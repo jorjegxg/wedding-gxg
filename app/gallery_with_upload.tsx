@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Image from "next/image";
 import { useUploadStore } from "./stores/uploadStore";
 
@@ -10,7 +10,7 @@ export default function GalleryWithLightbox() {
   const fetchImages = useUploadStore((state) => state.fetchImages);
   const uploadFiles = useUploadStore((state) => state.uploadFiles);
 
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [currentIndex, setCurrentIndex] = useState<number | null>(null);
 
   useEffect(() => {
     fetchImages();
@@ -19,6 +19,30 @@ export default function GalleryWithLightbox() {
   const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     uploadFiles(e.target.files);
   };
+
+  const closeLightbox = () => setCurrentIndex(null);
+
+  const showPrev = useCallback(() => {
+    if (currentIndex === null) return;
+    setCurrentIndex((currentIndex - 1 + images.length) % images.length);
+  }, [currentIndex, images.length]);
+
+  const showNext = useCallback(() => {
+    if (currentIndex === null) return;
+    setCurrentIndex((currentIndex + 1) % images.length);
+  }, [currentIndex, images.length]);
+
+  // navigare cu taste
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (currentIndex === null) return;
+      if (e.key === "ArrowLeft") showPrev();
+      if (e.key === "ArrowRight") showNext();
+      if (e.key === "Escape") closeLightbox();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [currentIndex, showPrev, showNext]);
 
   return (
     <div>
@@ -59,12 +83,13 @@ export default function GalleryWithLightbox() {
           <div
             key={i}
             className="w-full aspect-[2/3] relative rounded overflow-hidden shadow cursor-pointer"
-            onClick={() => setSelectedImage(url)}
+            onClick={() => setCurrentIndex(i)}
           >
             <Image
               src={url}
               alt={`Image ${i}`}
               fill
+              sizes="100vw"
               className="object-cover"
               quality={60}
               priority={i < 6}
@@ -74,24 +99,42 @@ export default function GalleryWithLightbox() {
       </div>
 
       {/* Lightbox */}
-    {selectedImage && (
-  <div
-    className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4"
-    onClick={() => setSelectedImage(null)}
-  >
-    <div className="relative w-full max-w-[500px] max-h-[90vh]">
-      <Image
-        src={selectedImage}
-        alt="Selected"
-        width={400}          // lățimea dorită
-        height={600}         // portret
-        className="object-contain rounded"
-      />
-    </div>
-  </div>
-)}
+      {currentIndex !== null && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4"
+          onClick={closeLightbox}
+        >
+          <div className="relative max-w-3xl max-h-[90vh]">
+            <Image
+              src={images[currentIndex]}
+              alt="Selected"
+              width={400}
+              height={600}
+              className="object-contain rounded"
+            />
 
-
+            {/* Butoane navigare */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                showPrev();
+              }}
+              className="absolute left-2 top-1/2 -translate-y-1/2 text-white text-3xl font-bold"
+            >
+              ‹
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                showNext();
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-white text-3xl font-bold"
+            >
+              ›
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
