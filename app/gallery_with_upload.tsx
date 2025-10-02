@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useUploadStore } from "./stores/uploadStore";
 
-export default function GalleryWithUpload() {
+export default function GalleryWithLightbox() {
   const loading = useUploadStore((state) => state.loading);
   const images = useUploadStore((state) => state.images);
   const fetchImages = useUploadStore((state) => state.fetchImages);
   const uploadFiles = useUploadStore((state) => state.uploadFiles);
 
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
   useEffect(() => {
-    fetchImages(); // fetch inițial
+    fetchImages();
   }, []);
 
   const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -51,24 +53,45 @@ export default function GalleryWithUpload() {
         <span className="text-2xl">📷</span>
       </label>
 
-      {/* Grid portret */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-6">
+      {/* Grid imagini */}
+      <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-6">
         {images.map((url, i) => (
           <div
             key={i}
-            className="w-full aspect-[3/4] relative rounded overflow-hidden shadow"
+            className="w-full aspect-[2/3] relative rounded overflow-hidden shadow cursor-pointer"
+            onClick={() => setSelectedImage(url)}
           >
             <Image
               src={url}
               alt={`Image ${i}`}
               fill
-              sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
               className="object-cover"
-              priority={i < 6} // primele imagini se încarcă rapid
+              quality={60}
+              priority={i < 6}
             />
           </div>
         ))}
       </div>
+
+      {/* Lightbox */}
+    {selectedImage && (
+  <div
+    className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4"
+    onClick={() => setSelectedImage(null)}
+  >
+    <div className="relative w-full max-w-[500px] max-h-[90vh]">
+      <Image
+        src={selectedImage}
+        alt="Selected"
+        width={400}          // lățimea dorită
+        height={600}         // portret
+        className="object-contain rounded"
+      />
+    </div>
+  </div>
+)}
+
+
     </div>
   );
 }
