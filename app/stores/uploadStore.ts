@@ -1,80 +1,94 @@
 // stores/uploadStore.ts
-import { create } from "zustand";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { storage, db } from "../firebaseConfig";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+"use client"; // Folosim hooks și Zustand pe partea de client
 
-interface UploadState {
-  loading: boolean;
-  images: string[]; // lista URL-urilor pentru afișare imediată
-  setLoading: (value: boolean) => void;
-  setImages: (images: string[]) => void;
-  uploadFiles: (files: FileList | null) => Promise<void>;
-  fetchImages: () => Promise<void>;
+import { create } from "zustand"; // Zustand pentru state management
+import { ref, list, listAll, getDownloadURL, uploadBytesResumable } from "firebase/storage"; // Firebase Storage
+import { storage } from "../firebaseConfig"; // Config-ul Firebase
+import { listPaginated } from "../utils/firebasePagination"; // Helper care returnează pagini cu imagini
+
+// Definim tipurile pentru store
+interface UploadStore {
+  loading: boolean; // true când upload sau fetch e în curs
+  images: string[]; // array cu URL-urile imaginilor
+  lastPageToken: string | null; // token-ul pentru pagina următoare în paginare
+  fetchImages: () => Promise<void>; // funcție pentru a încărca prima pagină
+  fetchMoreImages: () => Promise<void>; // funcție pentru a încărca următoarele pagini
+  uploadFiles: (files: FileList | null) => Promise<void>; // funcție pentru upload de fișiere
 }
 
-export const useUploadStore = create<UploadState>((set, get) => ({
-  loading: false,
-  images: [],
-  setLoading: (value) => set({ loading: value }),
-  setImages: (images) => set({ images }),
+// Creăm store-ul folosind Zustand
+export const useUploadStore = create<UploadStore>((set, get) => ({
+  loading: false,   // initial nu se încarcă nimic
+  images: [],       // lista de imagini e goală la start
+  lastPageToken: null, // nu avem token pentru pagină următoare
 
-  // fetch inițial sau refresh
+  // === Fetch prima pagină de imagini ===
   fetchImages: async () => {
+    set({ loading: true }); // setăm loading la true
     try {
-      const snapshot = await db.collection("images")
-        .orderBy("createdAt", "desc")
-        .get();
+      // folosim helper-ul pentru paginare
+      const { urls, nextPageToken } = await listPaginated(null); // null înseamnă prima pagină
 
-      const urls: string[] = snapshot.docs.map(doc => doc.data().path);
-      set({ images: urls });
-    } catch (err) {
-      console.error("Error fetching images:", err);
+      // actualizăm store-ul cu imaginile și token-ul pentru pagina următoare
+      set({
+        images: urls,
+        lastPageToken: nextPageToken ?? null, // dacă nu e token, punem null
+      });
+    } finally {
+      set({ loading: false }); // indiferent de succes/eroare, oprim loading
     }
   },
 
+  // === Fetch următoarele pagini ===
+  fetchMoreImages: async () => {
+    const { lastPageToken, images } = get(); // preluăm starea curentă
+
+    if (!lastPageToken) return; // dacă nu mai avem pagini, ieșim
+
+    set({ loading: true }); // începem loading
+    try {
+      const { urls, nextPageToken } = await listPaginated(lastPageToken); // fetch next page
+
+      // adăugăm noile imagini la cele existente
+      set({
+        images: [...images, ...urls],
+        lastPageToken: nextPageToken ?? null, // actualizăm token-ul
+      });
+    } finally {
+      set({ loading: false }); // stop loading
+    }
+  },
+
+  // === Upload fișiere ===
   uploadFiles: async (files) => {
-    if (!files) return;
-    const fileArray = Array.from(files);
-    set({ loading: true });
+    if (!files) return; // dacă nu sunt fișiere, ieșim
+    set({ loading: true }); // start loading
 
     try {
+      // mapăm fiecare fișier într-un upload async
       await Promise.all(
-        fileArray.map((file) => {
-          return new Promise<void>(async (resolve, reject) => {
-            const storageRef = ref(storage, `images/${file.name}`);
-            const uploadTask = uploadBytesResumable(storageRef, file);
+        Array.from(files).map(
+          (file) =>
+            new Promise<void>((resolve, reject) => {
+              // creăm referință în Storage
+              const storageRef = ref(storage, `images/${file.name}`);
+              const uploadTask = uploadBytesResumable(storageRef, file);
 
-            uploadTask.on(
-              "state_changed",
-              (snapshot) => {
-                const progress =
-                  (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                console.log(`Upload ${file.name}: ${progress.toFixed(2)}%`);
-              },
-              (error) => reject(error),
-              async () => {
-                const url = await getDownloadURL(storageRef);
-
-                // salvează referința în Firestore
-                await db.collection("images").add({
-                  path: url,
-                  createdAt: serverTimestamp(),
-                });
-
-                // adaugă imediat în store pentru refresh instant
-                set((state) => ({ images: [url, ...state.images] }));
-
-                resolve();
-              }
-            );
-          });
-        })
+              // ascultăm evenimentele upload-ului
+              uploadTask.on(
+                "state_changed",
+                undefined,        // nu vrem progress aici
+                (error) => reject(error), // error handler
+                () => resolve()           // success handler
+              );
+            })
+        )
       );
-    } catch (err) {
-      console.error("Upload error:", err);
+
+      // După ce upload-ul s-a terminat, reîncărcăm prima pagină
+      await get().fetchImages();
     } finally {
-      set({ loading: false });
+      set({ loading: false }); // stop loading
     }
   },
 }));
